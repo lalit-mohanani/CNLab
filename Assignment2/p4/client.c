@@ -37,6 +37,7 @@ void* send_file(void* arg) {
         close(client_socket);
         pthread_exit(NULL);
     }
+    printf("Sending file: %s\n", filepath);
 
     char buffer[MAX_MSG_SIZE];
     size_t bytes_read;
