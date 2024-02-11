@@ -41,7 +41,8 @@ void* send_file(void* arg) {
 
     char buffer[MAX_MSG_SIZE];
     size_t bytes_read;
-
+    send(client_socket,filepath, sizeof(filepath), 0);
+    sleep(1);
     while ((bytes_read = fread(buffer, 1, sizeof(buffer), file)) > 0) {
         if (send(client_socket, buffer, bytes_read, 0) != bytes_read) {
             perror("Error sending file");
@@ -98,8 +99,15 @@ void send_folder_parallel(const char* folder_path) {
         }
 
         if (S_ISREG(file_info.st_mode)) {
-            if (pthread_create(&threads[thread_index], NULL, send_file, (void*)file_path) != 0) {
+            char* thread_file_path = strdup(file_path); // Allocate memory for each thread's file path
+            if (thread_file_path == NULL) {
+                perror("Error duplicating file path");
+                continue;
+            }
+
+            if (pthread_create(&threads[thread_index], NULL, send_file, (void*)thread_file_path) != 0) {
                 perror("Error creating thread");
+                free(thread_file_path); // Free allocated memory in case of failure
                 exit(EXIT_FAILURE);
             }
             thread_index++;

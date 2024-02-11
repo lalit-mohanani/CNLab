@@ -3,82 +3,97 @@
 #include <string.h>
 #include <unistd.h>
 #include <arpa/inet.h>
-#include <fcntl.h>
-#include <sys/stat.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <sys/types.h>
+#include <dirent.h>
 
-#define MAX_MSG_SIZE 1024
-#define SERVER_PORT 12345
+#define PORT 8080
+#define MAX_FILENAME_LEN 256
+#define MAX_BUFFER_SIZE 1024
+#define IP "127.0.0.1"
+#define MAX_CONN 10
 
-void handle_client(int client_socket) {
-    char buffer[MAX_MSG_SIZE];
+void handle_connection(int client_socket)
+{
+    char filename[MAX_FILENAME_LEN];
     ssize_t bytes_received;
 
-    while ((bytes_received = recv(client_socket, buffer, sizeof(buffer), 0)) > 0) {
-        buffer[bytes_received] = '\0';
-
-        // Create a file to store received data
-        FILE *file = fopen("received_folder.zip", "ab"); // Modify filename as needed
-        if (file == NULL) {
-            perror("Error creating file");
-            exit(EXIT_FAILURE);
-        }
-
-        // Write received data to the file
-        if (fwrite(buffer, 1, bytes_received, file) != bytes_received) {
-            perror("Error writing to file");
-            exit(EXIT_FAILURE);
-        }
-
-        fclose(file);
+    // Receive filename
+    if ((bytes_received = recv(client_socket, filename, MAX_FILENAME_LEN, 0)) == -1)
+    {
+        perror("Receive failed");
+        close(client_socket);
+        exit(EXIT_FAILURE);
     }
 
+    printf("Received file: %s\n", filename);
+
+    // Open file
+    FILE *file = fopen(filename, "wb");
+
+    // Receive file data and write to file
+    char buffer[MAX_BUFFER_SIZE];
+    ssize_t bytes_read;
+    while ((bytes_read = recv(client_socket, buffer, MAX_BUFFER_SIZE, 0)) > 0)
+    {
+        fwrite(buffer, 1, bytes_read, file);
+    }
+
+    // Close file and connection
+    fclose(file);
     close(client_socket);
+    printf("File received successfully: %s\n", filename);
+
+    exit(EXIT_SUCCESS);
 }
 
-int main() {
+int main()
+{
     int server_socket, client_socket;
     struct sockaddr_in server_addr, client_addr;
-    socklen_t addr_size = sizeof(struct sockaddr_in);
+    socklen_t addr_len = sizeof(client_addr);
 
-    // Create socket
-    server_socket = socket(AF_INET, SOCK_STREAM, 0);
-    if (server_socket < 0) {
-        perror("Error in socket creation");
+    // Create server socket
+    if ((server_socket = socket(AF_INET, SOCK_STREAM, 0)) == -1)
+    {
+        perror("Socket creation failed");
         exit(EXIT_FAILURE);
     }
 
-    // Configure server address
+    // Set server address parameters
     server_addr.sin_family = AF_INET;
-    server_addr.sin_port = htons(SERVER_PORT);
     server_addr.sin_addr.s_addr = INADDR_ANY;
+    server_addr.sin_port = htons(PORT);
 
-    // Bind socket
-    if (bind(server_socket, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
-        perror("Error in binding");
-        exit(EXIT_FAILURE);
-    }
+    // Bind socket to address
+    bind(server_socket, (struct sockaddr *)&server_addr, sizeof(server_addr));
 
-    // Listen for incoming connections
-    if (listen(server_socket, 5) < 0) {
-        perror("Error in listen");
-        exit(EXIT_FAILURE);
-    }
+    // Listen for connections
+    listen(server_socket, MAX_CONN);
 
-    printf("Server started, waiting for connections...\n");
+    printf("Server listening on port %d...\n", PORT);
 
-    while (1) {
-        // Accept incoming connection
-        client_socket = accept(server_socket, (struct sockaddr *)&client_addr, &addr_size);
-        if (client_socket < 0) {
-            perror("Error in accept");
-            continue;
+    // Accept connections and handle them in separate processes
+    const char *folder_path = "sh_rec";  // Adjust the folder name as needed
+    mkdir(folder_path, 0777);  // Create the folder
+    chdir(folder_path);  
+    while (1)
+    {
+        if ((client_socket = accept(server_socket, (struct sockaddr *)&client_addr, &addr_len)) == -1)
+        {
+            perror("Accept failed");
+            exit(EXIT_FAILURE);
         }
+        printf("Connection accepted from %s:%d\n", inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
 
-        printf("Connected to client\n");
-
-        handle_client(client_socket);
-
-        printf("Disconnected from client\n");
+        pid_t child_pid = fork();
+        
+        if (child_pid == 0)
+        {
+            // Child process
+            handle_connection(client_socket);
+        }
     }
 
     close(server_socket);

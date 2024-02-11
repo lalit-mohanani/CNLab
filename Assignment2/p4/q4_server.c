@@ -130,9 +130,7 @@ int main() {
     while ((new_socket = accept(server_socket, (struct sockaddr *)&address, (socklen_t *)&addrlen))) {
         int *new_socket_ptr = malloc(sizeof(int));
         *new_socket_ptr = new_socket;
-        const char *folder_path = "sh_rec";  // Adjust the folder name as needed
-        mkdir(folder_path, 0777);  // Create the folder
-        chdir(folder_path);  
+        
         if (pthread_create(&thread_id, NULL, handle_client, (void *)new_socket_ptr) < 0) {
             perror("could not create thread");
             exit(EXIT_FAILURE);
