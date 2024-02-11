@@ -5,40 +5,68 @@
 #include <arpa/inet.h>
 #include <fcntl.h>
 #include <sys/stat.h>
+#include <pthread.h> // Include pthread library for threading
 
-#define MAX_MSG_SIZE 1024
+#define BUFFER_SIZE 1024
 #define SERVER_PORT 12345
 
-void handle_client(int client_socket, char* folder_path) {
-    char buffer[MAX_MSG_SIZE];
+void *handle_client(void *socket_desc) {
+    int client_socket = *(int *)socket_desc;
+    char buffer[BUFFER_SIZE]={0};
+        char file_name[BUFFER_SIZE];
+
     ssize_t bytes_received;
-
-    while(1){
-        bytes_received = recv(client_socket, buffer, sizeof(buffer), 0);
-        FILE *file = fopen(buffer, "wb");
-        if (file == NULL) {
-            perror("Error creating file");
-            exit(EXIT_FAILURE);
-        }
-        //for getting contents of file
-        while (1) {
-            bytes_received = recv(client_socket, buffer, sizeof(buffer), 0);
-
-            if (bytes_received == -1) {
-                perror("Error receiving data");
-                break;
-            }
-
-            if (bytes_received == 0) {
-                // End of file
-                fclose(file);
-                break;
-            }
-            //storing file
-            fwrite(buffer, 1, bytes_received, file);
-        }
-
+    if ((bytes_received = recv(client_socket, file_name, BUFFER_SIZE, 0)) < 0) {
+        perror("Error receiving file name.");
+        exit(EXIT_FAILURE);
     }
+    file_name[bytes_received] = '\0';
+    printf("File name received: %s\n", file_name);
+    FILE *received_file = fopen(file_name, "wb");
+    if (received_file == NULL) {
+        perror("Error opening file.");
+        exit(EXIT_FAILURE);
+    }
+    while ((bytes_received = recv(client_socket, buffer, BUFFER_SIZE, 0)) > 0) {
+        fwrite(buffer, sizeof(char), bytes_received, received_file);
+    }
+    if (bytes_received < 0) {
+        perror("Error receiving file.");
+        exit(EXIT_FAILURE);
+    }
+
+    printf("File received successfully.\n");
+
+    fclose(received_file);
+    close(client_socket);
+    free(socket_desc);
+    return NULL;
+    // while(1){
+    //     bytes_received = recv(client_socket, buffer, sizeof(buffer), 0);
+    //     FILE *file = fopen(buffer, "wb");
+    //     if (file == NULL) {
+    //         perror("Error creating file");
+    //         exit(EXIT_FAILURE);
+    //     }
+    //     //for getting contents of file
+    //     while (1) {
+    //         bytes_received = recv(client_socket, buffer, sizeof(buffer), 0);
+
+    //         if (bytes_received == -1) {
+    //             perror("Error receiving data");
+    //             break;
+    //         }
+
+    //         if (bytes_received == 0) {
+    //             // End of file
+    //             fclose(file);
+    //             break;
+    //         }
+    //         //storing file
+    //         fwrite(buffer, 1, bytes_received, file);
+    //     }
+
+    // }
 
     // while ((bytes_received = recv(client_socket, buffer, sizeof(buffer), 0)) > 0) {
     //     buffer[bytes_received] = '\0';
@@ -64,13 +92,18 @@ void handle_client(int client_socket, char* folder_path) {
 }
 
 int main() {
-    int server_socket, client_socket;
-    struct sockaddr_in server_addr, client_addr;
+    int server_socket;
+        int new_socket;
+    struct sockaddr_in address;
+    int addrlen = sizeof(address);
+
+
+    pthread_t thread_id;
+    struct sockaddr_in server_addr;
     socklen_t addr_size = sizeof(struct sockaddr_in);
 
     // Create socket
-    server_socket = socket(AF_INET, SOCK_STREAM, 0);
-    if (server_socket < 0) {
+    if((server_socket = socket(AF_INET, SOCK_STREAM, 0))==0){
         perror("Error in socket creation");
         exit(EXIT_FAILURE);
     }
@@ -94,22 +127,22 @@ int main() {
 
     printf("Server started, waiting for connections...\n");
 
-    while (1) {
-        // Accept incoming connection
-        client_socket = accept(server_socket, (struct sockaddr *)&client_addr, &addr_size);
-        if (client_socket < 0) {
-            perror("Error in accept");
-            continue;
-        }
+    while ((new_socket = accept(server_socket, (struct sockaddr *)&address, (socklen_t *)&addrlen))) {
+        int *new_socket_ptr = malloc(sizeof(int));
+        *new_socket_ptr = new_socket;
         const char *folder_path = "sh_rec";  // Adjust the folder name as needed
         mkdir(folder_path, 0777);  // Create the folder
-        chdir(folder_path);  // Change the working directory to the created folder
-        printf("Connected to client\n");
-
-        handle_client(client_socket, folder_path);
-
-        printf("Disconnected from client\n");
+        chdir(folder_path);  
+        if (pthread_create(&thread_id, NULL, handle_client, (void *)new_socket_ptr) < 0) {
+            perror("could not create thread");
+            exit(EXIT_FAILURE);
+        }
     }
+    if (new_socket < 0) {
+        perror("accept failed");
+        exit(EXIT_FAILURE);
+    }
+    
 
     close(server_socket);
     return 0;
