@@ -28,7 +28,7 @@ void write_file(int sockfd, struct sockaddr_in addr)
       break;
     }
 
-    printf("[RECEIVING] Data: %s", buffer);
+    printf("[RECEVING] Data: %s", buffer);
     fprintf(fp, "%s", buffer);
     bzero(buffer, SIZE);
   }
@@ -40,14 +40,14 @@ int main()
 {
 
   // Defining the IP and Port
-  char* ip = "192.168.105.204";
+  char* ip = "127.0.0.1";
   const int port = 8080;
 
   // Defining variables
   int server_sockfd;
   struct sockaddr_in server_addr, client_addr;
   char buffer[SIZE];
-  int sock_bind;
+  int e;
 
   // Creating a UDP socket
   server_sockfd = socket(AF_INET, SOCK_DGRAM, 0);
@@ -58,10 +58,10 @@ int main()
   }
   server_addr.sin_family = AF_INET;
   server_addr.sin_port = port;
-  server_addr.sin_addr.s_addr = INADDR_ANY;
+  server_addr.sin_addr.s_addr = inet_addr(ip);
 
-  sock_bind = bind(server_sockfd, (struct sockaddr*)&server_addr, sizeof(server_addr));
-  if (sock_bind < 0)
+  e = bind(server_sockfd, (struct sockaddr*)&server_addr, sizeof(server_addr));
+  if (e < 0)
   {
     perror("[ERROR] bind error");
     exit(1);

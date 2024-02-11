@@ -7,26 +7,31 @@
 
 void send_file_data(FILE* fp, int sockfd, struct sockaddr_in addr)
 {
-  int n;
-  char client_buffer[SIZE];
+  int n,s=0;
+  char buffer[SIZE];
 
   // Sending the data
-  while (fgets(client_buffer, SIZE, fp) != NULL)
+  while (1)
   {
-    printf("[SENDING] Data: %s", client_buffer);
-
-    n = sendto(sockfd, client_buffer, SIZE, 0, (struct sockaddr*)&addr, sizeof(addr));
+    if(fgets(buffer, SIZE, fp)==NULL) break;
+    printf("[SENDING] Data: %s", buffer);
+    s++;
+    n = sendto(sockfd, buffer, SIZE, 0, (struct sockaddr*)&addr, sizeof(addr));
     if (n == -1)
     {
       perror("[ERROR] sending data to the server.");
       exit(1);
     }
-    bzero(client_buffer, SIZE);
+    bzero(buffer, SIZE);
+    // usleep(1000);
   }
-  sleep(1);
+  printf("%d\n",s);
   // Sending the 'END'
-  strcpy(client_buffer, "END");
-  sendto(sockfd, client_buffer, SIZE, 0, (struct sockaddr*)&addr, sizeof(addr));
+  sleep(1);
+  bzero(buffer, SIZE);
+  strcpy(buffer, "END");
+
+  sendto(sockfd, buffer, SIZE, 0, (struct sockaddr*)&addr, sizeof(addr));
 
   fclose(fp);
 }
@@ -35,24 +40,24 @@ int main(void)
 {
 
   // Defining the IP and Port
-  char *ip = "127.0.0.1";
-  const int port = 8080;
+  char *ip = "10.10.64.59";
+  int port = 8080;
 
   // Defining variables
-  int sockfd;
+  int server_sockfd;
   struct sockaddr_in server_addr;
-  char *filename = "client_text.txt";
+  char *filename = "file2.txt";
   FILE *fp = fopen(filename, "r");
 
   // Creating a UDP socket
-  sockfd = socket(AF_INET, SOCK_DGRAM, 0);
-  if (sockfd < 0)
+  server_sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+  if (server_sockfd < 0)
   {
     perror("[ERROR] socket error");
     exit(1);
   }
   server_addr.sin_family = AF_INET;
-  server_addr.sin_port = port;
+  server_addr.sin_port = htons(port);
   server_addr.sin_addr.s_addr = inet_addr(ip);
 
   // Reading the text file
@@ -63,12 +68,12 @@ int main(void)
   }
 
   // Sending the file data to the server
-  send_file_data(fp, sockfd, server_addr);
+  send_file_data(fp, server_sockfd, server_addr);
 
   printf("[SUCCESS] Data transfer complete.\n");
   printf("[CLOSING] Disconnecting from the server.\n");
 
-  close(sockfd);
+  close(server_sockfd);
 
   return 0;
 }

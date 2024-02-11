@@ -1,54 +1,91 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <unistd.h>
+#include <arpa/inet.h>
+#include <dirent.h>
+#include <unistd.h>    // close() 
 
 #define SERVER_IP "127.0.0.1"
-#define PORT 12345
-#define BUF_SIZE 1024
+#define SERVER_PORT 12345
+#define BUFFER_SIZE 1024
 
-void receive_file(int socket, const char* filename) {
-    FILE* file = fopen(filename, "wb");
-    if (!file) {
-        printf("Error creating file: %s\n", filename);
-        return;
-    }
+void send_folder(int client_socket, const char *folder_path, struct sockaddr_in server_addr) {
 
-    char buffer[BUF_SIZE];
-    ssize_t bytesRead;
+    struct dirent *entry;
+    DIR *dir = opendir(folder_path);
 
-    while ((bytesRead = recv(socket, buffer, sizeof(buffer), 0)) > 0) {
-        fwrite(buffer, 1, bytesRead, file);
-    }
-
-    fclose(file);
-}
-
-int main() {
-    int clientSocket;
-    struct sockaddr_in serverAddr;
-
-    // Create UDP socket
-    if ((clientSocket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) == -1) {
-        perror("socket");
+    if (dir == NULL) {
+        perror("Error opening folder");
         exit(EXIT_FAILURE);
     }
 
-    memset((char*)&serverAddr, 0, sizeof(serverAddr));
-    serverAddr.sin_family = AF_INET;
-    serverAddr.sin_port = htons(PORT);
-    serverAddr.sin_addr.s_addr = inet_addr(SERVER_IP);// Server IP address
+    while ((entry = readdir(dir)) != NULL) {
+        if (strcmp(entry->d_name, ".") != 0 && strcmp(entry->d_name, "..") != 0) {
+            char file_path[BUFFER_SIZE];
+            sprintf(file_path, "%s/%s", folder_path, entry->d_name);
 
-    // Send folder name to server
-    char folderName[] = "/home/lalit/CNlab/Assignment1/test";
-    sendto(clientSocket, folderName, strlen(folderName), 0, (struct sockaddr*)&serverAddr, sizeof(serverAddr));
+            // Send file name
+            if (sendto(client_socket, entry->d_name, strlen(entry->d_name), 0, (struct sockaddr *)&server_addr, sizeof(server_addr)) == -1) {
+                perror("Error sending data");
+                exit(EXIT_FAILURE);
+            }
 
-    // Receive files from server
-    receive_file(clientSocket, "test"); // Specify the destination folder name
+            FILE *file = fopen(file_path, "rb");
+            if (file == NULL) {
+                perror("Error opening file");
+                exit(EXIT_FAILURE);
+            }
 
-    close(clientSocket);
+            while (1) {
+                char buffer[BUFFER_SIZE];
+                size_t bytes_read = fread(buffer, 1, BUFFER_SIZE, file);
+
+                if (bytes_read == 0) {
+                    // End of file
+                    break;
+                }
+
+                if (sendto(client_socket, buffer, bytes_read, 0, (struct sockaddr *)&server_addr, sizeof(server_addr)) == -1) {
+                    perror("Error sending data");
+                    exit(EXIT_FAILURE);
+                }
+            }
+
+            fclose(file);
+            // Signal the end of the file
+            sendto(client_socket, "", 0, 0, (struct sockaddr *)&server_addr, sizeof(server_addr));
+        }
+    }
+
+    closedir(dir);
+    // Signal the end of the folder
+    sendto(client_socket, "", 0, 0, (struct sockaddr *)&server_addr, sizeof(server_addr));
+}
+
+int main() {
+    int client_socket;
+    struct sockaddr_in server_addr;
+
+    // Create socket
+    client_socket = socket(AF_INET, SOCK_DGRAM, 0);
+    if (client_socket == -1) {
+        perror("Error creating socket");
+        exit(EXIT_FAILURE);
+    }
+
+    // Configure server address
+    memset(&server_addr, 0, sizeof(server_addr));
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_addr.s_addr = inet_addr(SERVER_IP);
+    server_addr.sin_port = htons(SERVER_PORT);
+
+    const char *folder_path = "test";  // Adjust the folder name as needed
+
+    send_folder(client_socket, folder_path, server_addr);
+
+    close(client_socket);
+
+    printf("Folder sent to %s:%d\n", SERVER_IP, SERVER_PORT);
 
     return 0;
 }

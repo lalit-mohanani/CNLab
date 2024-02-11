@@ -1,100 +1,99 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
+#include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+#include <fcntl.h>
+#include <errno.h>
 #include <unistd.h>
-#include <dirent.h>
+#include <arpa/inet.h>
+#include <sys/stat.h>
+ 
 
-#define PORT 12345
-#define BUF_SIZE 1024
 
-void send_file(int socket, const char* filename) {
-    FILE* file = fopen(filename, "rb");
-    if (!file) {
-        printf("Error opening file: %s\n", filename);
-        return;
-    }
+#define SERVER_PORT 12345
+#define BUFFER_SIZE 1024
 
-    char buffer[BUF_SIZE];
-    size_t bytesRead;
 
-    while ((bytesRead = fread(buffer, 1, sizeof(buffer), file)) > 0) {
-        send(socket, buffer, bytesRead, 0);
-    }
+void receive_folder(int server_socket, const char *folder_path) {
+    struct sockaddr_in client_addr;
+    socklen_t client_addr_len = sizeof(client_addr);
 
-    fclose(file);
-}
+    char buffer[BUFFER_SIZE];
+    ssize_t bytes_received;
 
-void send_folder(int socket, const char* folderName) {
-    DIR* dir = opendir(folderName);
-    if (!dir) {
-        perror("opendir");
-        return;
-    }
+    while (1) {
+        bytes_received = recvfrom(server_socket, buffer, BUFFER_SIZE, 0, (struct sockaddr *)&client_addr, &client_addr_len);
 
-    struct dirent* entry;
-    while ((entry = readdir(dir)) != NULL) {
-        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
-            continue; // Skip "." and ".." directories
+        if (bytes_received == -1) {
+            perror("Error receiving data");
+            break;
         }
 
-        char filepath[BUF_SIZE];
-        snprintf(filepath, BUF_SIZE, "%s/%s", folderName, entry->d_name);
+        if (bytes_received == 0) {
+            printf("Folder received successfully.\n");
+            break;
+        }
 
-        if (entry->d_type == DT_DIR) {
-            send_folder(socket, filepath); // Recursively send subdirectories
-        } else if (entry->d_type == DT_REG) {
-            send_file(socket, filepath); // Send regular files
+        // Create directories and files
+        FILE *file = fopen(buffer, "wb");
+        if (file == NULL) {
+            perror("Error creating file");
+            exit(EXIT_FAILURE);
+        }
+        //for getting contents of file
+        while (1) {
+            bytes_received = recvfrom(server_socket, buffer, BUFFER_SIZE, 0, (struct sockaddr *)&client_addr, &client_addr_len);
+
+            if (bytes_received == -1) {
+                perror("Error receiving data");
+                break;
+            }
+
+            if (bytes_received == 0) {
+                // End of file
+                fclose(file);
+                break;
+            }
+            //storing file
+            fwrite(buffer, 1, bytes_received, file);
         }
     }
-
-    closedir(dir);
+    
 }
 
 int main() {
-    int serverSocket;
-    struct sockaddr_in serverAddr;
+    int server_socket;
+    struct sockaddr_in server_addr;
 
-    // Create UDP socket
-    if ((serverSocket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) == -1) {
-        perror("socket");
+    const char *folder_path = "test_rec";  // Adjust the folder name as needed
+    mkdir(folder_path, 0777);  // Create the folder
+    chdir(folder_path);  // Change the working directory to the created folder
+
+    // Create socket
+    server_socket = socket(AF_INET, SOCK_DGRAM, 0);
+    if (server_socket == -1) {
+        perror("Error creating socket");
+        fprintf(stderr, "Error code: %d\n", errno);
         exit(EXIT_FAILURE);
     }
 
-    memset((char*)&serverAddr, 0, sizeof(serverAddr));
-    serverAddr.sin_family = AF_INET;
-    serverAddr.sin_port = htons(PORT);
-    serverAddr.sin_addr.s_addr = INADDR_ANY;
+    // Bind the socket to a specific port
+    memset(&server_addr, 0, sizeof(server_addr));
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_addr.s_addr = INADDR_ANY;
+    server_addr.sin_port = htons(SERVER_PORT);
 
-    // Bind to port
-    if (bind(serverSocket, (struct sockaddr*)&serverAddr, sizeof(serverAddr)) == -1) {
-        perror("bind");
-        close(serverSocket);
+    if (bind(server_socket, (struct sockaddr *)&server_addr, sizeof(server_addr)) == -1) {
+        perror("Error binding socket");
         exit(EXIT_FAILURE);
     }
 
-    printf("Server is listening on port %d...\n", PORT);
+    printf("Server listening on port %d\n", SERVER_PORT);
 
-    // while (1) {
-        // Receive folder name from client
-        char folderName[BUF_SIZE];
-        struct sockaddr_in clientAddr;
-        socklen_t addrLen = sizeof(clientAddr);
+    receive_folder(server_socket, folder_path);
 
-        ssize_t recvSize = recvfrom(serverSocket, folderName, BUF_SIZE, 0, (struct sockaddr*)&clientAddr, &addrLen);
-        if (recvSize == -1) {
-            perror("recvfrom");
-        }
-
-        folderName[recvSize] = '\0'; // Null-terminate the received folder name
-        printf("Received folder name: %s\n", folderName);
-
-        // Send folder contents to client
-        send_folder(serverSocket, folderName);
-    // }
-
-    close(serverSocket);
-
+    close(server_socket);
     return 0;
 }
